@@ -5,7 +5,7 @@ import { storage } from "@/lib/storage"
 import { useState, useEffect } from "react"
 import { GeneratedImage } from "@/types"
 import Image from "next/image"
-import { Download, Trash2, Edit } from "lucide-react"
+import { Download, Trash2, Edit, Play, Pause } from "lucide-react"
 import { Button } from "./ui/button"
 
 interface HistoryDialogProps {
@@ -18,6 +18,8 @@ export function HistoryDialog({ open, onOpenChange, onEditImage }: HistoryDialog
   const [history, setHistory] = useState<GeneratedImage[]>([])
   const [showContentDialog, setShowContentDialog] = useState(false)
   const [selectedContent, setSelectedContent] = useState<GeneratedImage | null>(null)
+  const [isPlaying, setIsPlaying] = useState(false)
+  const [videoDimensions, setVideoDimensions] = useState<{width: number, height: number} | null>(null)
 
   const isVideoUrl = (url: string) => {
     return url.includes('.mp4') || url.includes('.webm') || url.includes('.mov') || url.startsWith('data:video')
@@ -67,6 +69,34 @@ export function HistoryDialog({ open, onOpenChange, onEditImage }: HistoryDialog
     console.log('handleShowContent called with:', item.id)
     setSelectedContent(item)
     setShowContentDialog(true)
+    setIsPlaying(false)
+    setVideoDimensions(null)
+  }
+
+  const handleVideoLoadedMetadata = (e: React.SyntheticEvent<HTMLVideoElement>) => {
+    const video = e.currentTarget
+    setVideoDimensions({
+      width: video.videoWidth,
+      height: video.videoHeight
+    })
+  }
+
+  const handlePlayPause = () => {
+    const video = document.querySelector('#detail-video') as HTMLVideoElement
+    if (video) {
+      if (isPlaying) {
+        video.pause()
+      } else {
+        video.play()
+      }
+      setIsPlaying(!isPlaying)
+    }
+  }
+
+  const getVideoAspectRatio = () => {
+    if (!videoDimensions) return 'aspect-video'
+    const isPortrait = videoDimensions.height > videoDimensions.width
+    return isPortrait ? 'aspect-[9/16]' : 'aspect-video'
   }
 
   return (
@@ -113,16 +143,24 @@ export function HistoryDialog({ open, onOpenChange, onEditImage }: HistoryDialog
                       className="object-cover"
                     />
                   )}
+                  
+                  {/* 类型标签 */}
+                  <div className="absolute top-2 left-2 bg-black/70 text-white px-2 py-1 rounded text-xs font-medium">
+                    {isVideoUrl(item.url) ? '视频' : '图片'}
+                  </div>
                 </div>
                 <div 
                   className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-2"
-                  style={{ pointerEvents: 'none' }}
+                  onDoubleClick={(e) => {
+                    e.preventDefault()
+                    e.stopPropagation()
+                    handleShowContent(item)
+                  }}
                 >
                   <Button
                     size="icon"
                     variant="ghost"
                     className="text-white hover:text-white hover:bg-white/20"
-                    style={{ pointerEvents: 'auto' }}
                     onClick={(e) => {
                       e.stopPropagation()
                       handleDownload(item.url)
@@ -135,7 +173,6 @@ export function HistoryDialog({ open, onOpenChange, onEditImage }: HistoryDialog
                       size="icon"
                       variant="ghost"
                       className="text-white hover:text-white hover:bg-white/20"
-                      style={{ pointerEvents: 'auto' }}
                       onClick={(e) => {
                         e.stopPropagation()
                         handleEdit(item)
@@ -148,26 +185,12 @@ export function HistoryDialog({ open, onOpenChange, onEditImage }: HistoryDialog
                     size="icon"
                     variant="ghost"
                     className="text-white hover:text-white hover:bg-white/20"
-                    style={{ pointerEvents: 'auto' }}
                     onClick={(e) => {
                       e.stopPropagation()
                       handleDelete(item.id)
                     }}
                   >
                     <Trash2 className="h-5 w-5" />
-                  </Button>
-                  <Button
-                    size="icon"
-                    variant="ghost"
-                    className="text-white hover:text-white hover:bg-white/20"
-                    style={{ pointerEvents: 'auto' }}
-                    onClick={(e) => {
-                      e.stopPropagation()
-                      handleShowContent(item)
-                    }}
-                    title="查看详情"
-                  >
-                    <span className="text-xs">详情</span>
                   </Button>
                 </div>
               </div>
@@ -190,22 +213,61 @@ export function HistoryDialog({ open, onOpenChange, onEditImage }: HistoryDialog
             {/* 左侧：内容展示 */}
             <div className="flex items-center justify-center">
               {isVideoUrl(selectedContent.url) ? (
-                <div className="w-full aspect-video">
-                  <video
-                    src={selectedContent.url}
-                    controls
-                    autoPlay
-                    className="w-full h-full rounded-lg"
-                  />
+                <div className={`w-full max-w-2xl ${getVideoAspectRatio()}`}>
+                  <div className="relative w-full h-full bg-black rounded-lg overflow-hidden">
+                    <video
+                      id="detail-video"
+                      src={selectedContent.url}
+                      className="w-full h-full object-contain"
+                      onLoadedMetadata={handleVideoLoadedMetadata}
+                      onPlay={() => setIsPlaying(true)}
+                      onPause={() => setIsPlaying(false)}
+                      muted={false}
+                      playsInline
+                    />
+                    
+                    {/* 自定义播放控件覆盖层 */}
+                    {!isPlaying && (
+                      <div className="absolute inset-0 flex items-center justify-center bg-black/20">
+                        <Button
+                          size="lg"
+                          className="w-16 h-16 rounded-full bg-white/90 hover:bg-white text-black hover:text-black shadow-lg"
+                          onClick={handlePlayPause}
+                        >
+                          <Play className="h-8 w-8 ml-1" />
+                        </Button>
+                      </div>
+                    )}
+                    
+                    {/* 暂停时的控件 */}
+                    {isPlaying && (
+                      <div 
+                        className="absolute inset-0 cursor-pointer"
+                        onClick={handlePlayPause}
+                      >
+                        <div className="absolute inset-0 bg-black/0 hover:bg-black/10 transition-colors flex items-center justify-center">
+                          <Button
+                            size="lg"
+                            className="w-12 h-12 rounded-full bg-white/80 hover:bg-white/90 text-black opacity-0 hover:opacity-100 transition-opacity"
+                          >
+                            <Pause className="h-6 w-6" />
+                          </Button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
                 </div>
               ) : (
-                <div className="w-full aspect-square max-w-lg">
-                  <Image
-                    src={selectedContent.url}
-                    alt={selectedContent.prompt}
-                    fill
-                    className="object-contain rounded-lg"
-                  />
+                <div className="w-full aspect-auto max-w-lg">
+                  <div className="relative w-full h-auto">
+                    <Image
+                      src={selectedContent.url}
+                      alt={selectedContent.prompt}
+                      width={500}
+                      height={500}
+                      className="object-contain rounded-lg w-full h-auto"
+                    />
+                  </div>
                 </div>
               )}
             </div>
