@@ -101,11 +101,12 @@ export function HistoryDialog({ open, onOpenChange, onEditImage }: HistoryDialog
 
   return (
     <>
+      {/* 历史记录对话框 */}
       <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-4xl max-h-[80vh] overflow-y-auto">
-        <DialogHeader>
-          <DialogTitle>生成历史</DialogTitle>
-        </DialogHeader>
+        <DialogContent className="max-w-4xl max-h-[80vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>生成历史</DialogTitle>
+          </DialogHeader>
         {history.length === 0 ? (
           <div className="text-center py-8 text-gray-500">
             暂无生成记录
@@ -202,19 +203,19 @@ export function HistoryDialog({ open, onOpenChange, onEditImage }: HistoryDialog
     
     {/* 内容展示弹窗 */}
     <Dialog open={showContentDialog} onOpenChange={setShowContentDialog}>
-      <DialogContent className="max-w-6xl max-h-[90vh]">
+      <DialogContent className="!max-w-[90vw] !w-auto max-h-[90vh]">
         <DialogHeader>
           <DialogTitle>
             {selectedContent && isVideoUrl(selectedContent.url) ? "视频详情" : "图片详情"}
           </DialogTitle>
         </DialogHeader>
         {selectedContent && (
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 overflow-y-auto">
+          <div className="flex flex-col lg:flex-row gap-6 max-h-[75vh] overflow-hidden">
             {/* 左侧：内容展示 */}
-            <div className="flex items-center justify-center">
+            <div className="flex items-center justify-center flex-shrink-0 max-w-[50vw]">
               {isVideoUrl(selectedContent.url) ? (
-                <div className={`w-full max-w-2xl ${getVideoAspectRatio()}`}>
-                  <div className="relative w-full h-full bg-black rounded-lg overflow-hidden">
+                <div className={`w-full max-w-lg ${getVideoAspectRatio()}`}>
+                  <div className="relative w-full h-full bg-black rounded-lg overflow-hidden max-h-[70vh] flex items-center justify-center">
                     <video
                       id="detail-video"
                       src={selectedContent.url}
@@ -258,14 +259,14 @@ export function HistoryDialog({ open, onOpenChange, onEditImage }: HistoryDialog
                   </div>
                 </div>
               ) : (
-                <div className="w-full aspect-auto max-w-lg">
-                  <div className="relative w-full h-auto">
+                <div className="w-full max-w-lg">
+                  <div className="relative w-full h-auto max-h-[70vh] overflow-hidden rounded-lg">
                     <Image
                       src={selectedContent.url}
                       alt={selectedContent.prompt}
                       width={500}
                       height={500}
-                      className="object-contain rounded-lg w-full h-auto"
+                      className="object-contain w-full h-auto max-h-[70vh]"
                     />
                   </div>
                 </div>
@@ -273,14 +274,14 @@ export function HistoryDialog({ open, onOpenChange, onEditImage }: HistoryDialog
             </div>
             
             {/* 右侧：详细信息 */}
-            <div className="space-y-6">
+            <div className="space-y-6 flex-1 min-w-0 max-w-2xl overflow-y-auto">
               <div>
                 <h4 className="font-semibold text-gray-900 mb-3 flex items-center gap-2">
                   <span className="w-2 h-2 bg-blue-500 rounded-full"></span>
                   提示词
                 </h4>
-                <div className="bg-gray-50 rounded-lg p-4">
-                  <p className="text-gray-700 text-sm leading-relaxed">{selectedContent.prompt}</p>
+                <div className="bg-gray-50 rounded-lg p-4 min-w-0">
+                  <p className="text-gray-700 text-sm leading-relaxed break-words whitespace-pre-wrap overflow-wrap-anywhere">{selectedContent.prompt}</p>
                 </div>
               </div>
               

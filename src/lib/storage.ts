@@ -11,7 +11,7 @@ const DEFAULT_MODELS: CustomModel[] = [
   {
     id: 'default-fal-flux-pro',
     name: 'FAL FLUX Pro',
-    value: 'fal-flux-pro',
+    value: 'fal-ai/flux-pro',
     type: ModelType.FAL,
     tag: ModelTag.TEXT_TO_IMAGE,
     createdAt: new Date().toISOString(),

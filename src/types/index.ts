@@ -44,7 +44,7 @@ export interface CustomModel {
   isDefault?: boolean
 }
 
-export type GenerationModel = 'sora_image' | 'gpt_4o_image' | 'gpt-image-1' | 'dall-e-3' | 'fal-flux-pro' | string
+export type GenerationModel = 'sora_image' | 'gpt_4o_image' | 'gpt-image-1' | 'dall-e-3' | 'fal-ai/flux-pro' | string
 export type AspectRatio = 'original' | '1:1' | '16:9' | '9:16' | '2:3' | '3:2' | '4:5' | '5:4' | '3:4' | '4:3' | '21:9' | '9:21'
 export type ImageSize = '1024x1024' | '1536x1024' | '1024x1536' | 'auto' | '1792x1024'
 

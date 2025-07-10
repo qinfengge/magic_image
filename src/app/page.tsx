@@ -36,7 +36,7 @@ function HomeContent() {
   const [customModels, setCustomModels] = useState<CustomModel[]>([])
   const [showCustomModelDialog, setShowCustomModelDialog] = useState(false)
   const [prompt, setPrompt] = useState("")
-  const [model, setModel] = useState<GenerationModel>("fal-flux-pro")
+  const [model, setModel] = useState<GenerationModel>("fal-ai/flux-pro")
   const [modelType, setModelType] = useState<ModelType>(ModelType.FAL)
 
   // 获取标签显示文本
