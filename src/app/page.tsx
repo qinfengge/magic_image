@@ -10,7 +10,7 @@ import { ApiKeyDialog } from "@/components/api-key-dialog"
 import { HistoryDialog } from "@/components/history-dialog"
 import { useState, useRef, useEffect, Suspense } from "react"
 import { api } from "@/lib/api"
-import { GenerationModel, AspectRatio, ImageSize, DalleImageData, ModelType } from "@/types"
+import { GenerationModel, AspectRatio, ImageSize, DalleImageData, ModelType, CustomModel, ModelTag } from "@/types"
 import { storage } from "@/lib/storage"
 import { v4 as uuidv4 } from 'uuid'
 import { Dialog, DialogContent } from "@/components/ui/dialog"
@@ -33,10 +33,49 @@ export default function Home() {
 function HomeContent() {
   const [showApiKeyDialog, setShowApiKeyDialog] = useState(false)
   const [showHistoryDialog, setShowHistoryDialog] = useState(false)
+  const [customModels, setCustomModels] = useState<CustomModel[]>([])
   const [showCustomModelDialog, setShowCustomModelDialog] = useState(false)
   const [prompt, setPrompt] = useState("")
-  const [model, setModel] = useState<GenerationModel>("sora_image")
-  const [modelType, setModelType] = useState<ModelType>(ModelType.OPENAI)
+  const [model, setModel] = useState<GenerationModel>("fal-flux-pro")
+  const [modelType, setModelType] = useState<ModelType>(ModelType.FAL)
+
+  // 获取标签显示文本
+  const getTagDisplayText = (tag?: ModelTag): string => {
+    if (!tag) return ''
+    switch (tag) {
+      case ModelTag.TEXT_TO_IMAGE:
+        return '文生图'
+      case ModelTag.IMAGE_TO_IMAGE:
+        return '图生图'
+      case ModelTag.TEXT_TO_VIDEO:
+        return '文生视频'
+      case ModelTag.IMAGE_TO_VIDEO:
+        return '图生视频'
+      default:
+        return ''
+    }
+  }
+
+  // 根据当前模型标签判断是否需要图片输入
+  const shouldShowImageUpload = (): boolean => {
+    const currentModel = customModels.find(m => m.value === model)
+    if (!currentModel || !currentModel.tag) return false
+    return currentModel.tag === ModelTag.IMAGE_TO_IMAGE || currentModel.tag === ModelTag.IMAGE_TO_VIDEO
+  }
+
+  // 根据当前模型标签判断是否为视频模型
+  const isVideoModel = (): boolean => {
+    const currentModel = customModels.find(m => m.value === model)
+    if (!currentModel || !currentModel.tag) return false
+    return currentModel.tag === ModelTag.TEXT_TO_VIDEO || currentModel.tag === ModelTag.IMAGE_TO_VIDEO
+  }
+
+  // 获取当前模式描述
+  const getCurrentModeDescription = (): string => {
+    const currentModel = customModels.find(m => m.value === model)
+    if (!currentModel || !currentModel.tag) return '请选择模型'
+    return getTagDisplayText(currentModel.tag)
+  }
   const [isGenerating, setIsGenerating] = useState(false)
   const [generatedImages, setGeneratedImages] = useState<string[]>([])
   const [currentImageIndex, setCurrentImageIndex] = useState(0)
@@ -45,10 +84,13 @@ function HomeContent() {
   const [streamContent, setStreamContent] = useState<string>("")
   const [isImageToImage, setIsImageToImage] = useState(false)
   const [sourceImages, setSourceImages] = useState<string[]>([])
-  const [aspectRatio, setAspectRatio] = useState<AspectRatio>("1:1")
+  const [aspectRatio, setAspectRatio] = useState<AspectRatio>("original")
   const [size, setSize] = useState<ImageSize>("1024x1024")
   const [n, setN] = useState(1)
   const [quality, setQuality] = useState<'auto' | 'high' | 'medium' | 'low' | 'hd' | 'standard'>('auto')
+  const [enableSafetyChecker, setEnableSafetyChecker] = useState(true)
+  const [safetyTolerance, setSafetyTolerance] = useState<'1' | '2' | '3' | '4' | '5' | '6'>('2')
+  const [duration, setDuration] = useState<'5' | '10'>('5')
   const contentRef = useRef<HTMLDivElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const [showMaskEditor, setShowMaskEditor] = useState(false)
@@ -75,7 +117,47 @@ function HomeContent() {
       storage.setApiConfig(storedConfig.key, secureUrl)
       console.log('API URL已自动升级到HTTPS:', secureUrl)
     }
+
+    // 加载自定义模型并设置默认模型
+    const models = storage.getCustomModels()
+    setCustomModels(models)
+    
+    // 选择第一个可用模型作为默认模型
+    if (models.length > 0) {
+      const firstModel = models[0]
+      setModel(firstModel.value)
+      setModelType(firstModel.type)
+    }
   }, [searchParams])
+
+  // 监听自定义模型对话框关闭，重新加载模型
+  useEffect(() => {
+    if (!showCustomModelDialog) {
+      const models = storage.getCustomModels()
+      setCustomModels(models)
+      
+      // 如果当前没有选择模型，或者选择的模型不存在，选择第一个可用模型
+      if (!model || !models.find(m => m.value === model)) {
+        const firstModel = models[0]
+        if (firstModel) {
+          setModel(firstModel.value)
+          setModelType(firstModel.type)
+        }
+      }
+    }
+  }, [showCustomModelDialog, model])
+
+  // 自动根据模型标签切换生成模式
+  useEffect(() => {
+    const isImageMode = shouldShowImageUpload()
+    setIsImageToImage(isImageMode)
+    // 当模式切换时，自动设置合适的默认比例
+    if (isImageMode && aspectRatio === "1:1") {
+      setAspectRatio("original")
+    } else if (!isImageMode && aspectRatio === "original") {
+      setAspectRatio("1:1")
+    }
+  }, [model, customModels, aspectRatio])
 
   const handleFileUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
     const files = event.target.files
@@ -114,14 +196,19 @@ function HomeContent() {
     return url.startsWith('data:image');
   }
 
+  const isVideoUrl = (url: string) => {
+    return url.includes('.mp4') || url.includes('.webm') || url.includes('.mov') || url.startsWith('data:video')
+  }
+
   const handleSelectCustomModel = (modelValue: string, type: ModelType) => {
     setModel(modelValue)
     setModelType(type)
+    setCustomModels(storage.getCustomModels()) // 刷新自定义模型列表
     toast.success("已选择自定义模型")
   }
 
   const handleGenerate = async () => {
-    if (isImageToImage && sourceImages.length === 0) {
+    if (shouldShowImageUpload() && sourceImages.length === 0) {
       setError("请先上传或选择图片")
       return
     }
@@ -137,145 +224,130 @@ function HomeContent() {
     setCurrentImageIndex(0)
 
     try {
-      const isDalleModel = model === 'dall-e-3' || model === 'gpt-image-1' || modelType === ModelType.DALLE
-      
       // 如果有多张源图片，将它们的信息添加到提示词中
       let enhancedPrompt = prompt.trim();
       if (sourceImages.length > 1) {
         enhancedPrompt += `\n\n参考图片信息：上传了${sourceImages.length}张参考图片，第一张作为主要参考，其他图片作为额外参考。`;
       }
       
-      const finalPrompt = isDalleModel ? enhancedPrompt : `${enhancedPrompt}\n图片生成比例为：${aspectRatio}`
+      const finalPrompt = enhancedPrompt
       
-      if (isDalleModel) {
-        if (isImageToImage) {
-          if (sourceImages.length === 0) {
-            throw new Error('请先上传图片')
-          }
-          
-          try {
-            // DALL-E API仅支持使用第一张图片进行编辑
-            // 注意: 对于generateStreamImage方法，我们已添加对多图片的支持
-            const response = await api.editDalleImage({
-              prompt: finalPrompt,
-              model,
-              modelType,
-              sourceImage: sourceImages[0],
-              size,
-              n,
-              mask: maskImage || undefined,
-              quality
-            })
-            
-            const imageUrls = response.data.map(item => {
-              // 处理DALL-E返回的URL或base64图片
-              const imageUrl = item.url || item.b64_json;
-              // 如果是base64格式，添加data:image前缀(如果还没有)
-              if (imageUrl && item.b64_json && !isBase64Image(imageUrl)) {
-                return `data:image/png;base64,${imageUrl}`;
-              }
-              return imageUrl || ''; // 添加空字符串作为默认值
-            }).filter(url => url !== ''); // 过滤掉空链接
-            
-            setGeneratedImages(imageUrls)
-            
-            if (imageUrls.length > 0) {
-              storage.addToHistory({
-                id: uuidv4(),
-                prompt: finalPrompt,
-                url: imageUrls[0],
-                model,
-                createdAt: new Date().toISOString(),
-                aspectRatio: '1:1'
-              })
-            }
-          } catch (err) {
-            if (err instanceof Error) {
-              setError(err.message)
-            } else {
-              setError('生成图片失败，请重试')
-            }
-          }
-        } else {
-          try {
-            const response = await api.generateDalleImage({
-              prompt: finalPrompt,
-              model,
-              size,
-              n,
-              quality
-            })
-            
-            const imageUrls = response.data.map(item => {
-              // 处理DALL-E返回的URL或base64图片
-              const imageUrl = item.url || item.b64_json;
-              // 如果是base64格式，添加data:image前缀(如果还没有)
-              if (imageUrl && item.b64_json && !isBase64Image(imageUrl)) {
-                return `data:image/png;base64,${imageUrl}`;
-              }
-              return imageUrl || ''; // 添加空字符串作为默认值
-            }).filter(url => url !== ''); // 过滤掉空链接
-            
-            setGeneratedImages(imageUrls)
-            
-            if (imageUrls.length > 0) {
-              storage.addToHistory({
-                id: uuidv4(),
-                prompt: finalPrompt,
-                url: imageUrls[0],
-                model,
-                createdAt: new Date().toISOString(),
-                aspectRatio: '1:1'
-              })
-            }
-          } catch (err) {
-            if (err instanceof Error) {
-              setError(err.message)
-            } else {
-              setError('生成图片失败，请重试')
-            }
-          }
-        }
-      } else {
-        await api.generateStreamImage(
-          {
+      try {
+        let response;
+        
+        if (modelType === ModelType.FAL) {
+          // FAL 模型生成
+          response = await api.generateFalImage({
             prompt: finalPrompt,
             model,
             modelType,
-            sourceImage: isImageToImage && sourceImages.length > 0 ? sourceImages[0] : undefined,
-            sourceImages: isImageToImage ? sourceImages : undefined,
-            isImageToImage,
-            aspectRatio
-          },
-          {
-            onMessage: (content) => {
-              setStreamContent(prev => prev + content)
-              if (contentRef.current) {
-                contentRef.current.scrollTop = contentRef.current.scrollHeight
-              }
-            },
-            onComplete: (imageUrl) => {
-              setGeneratedImages([imageUrl])
-              storage.addToHistory({
-                id: uuidv4(),
+            sourceImages: shouldShowImageUpload() ? sourceImages : undefined,
+            aspectRatio,
+            n,
+            enableSafetyChecker,
+            safetyTolerance,
+            duration: isVideoModel() ? duration : undefined
+          })
+          
+          setGeneratedImages([response.imageUrl])
+        } else if (modelType === ModelType.OPENAI) {
+          // OpenAI 模型生成（流式）
+          if (shouldShowImageUpload()) {
+            // 图生图，使用编辑功能
+            if (maskImage) {
+              const editResponse = await api.editDalleImage({
                 prompt: finalPrompt,
-                url: imageUrl,
                 model,
-                createdAt: new Date().toISOString(),
-                aspectRatio
+                modelType,
+                sourceImage: sourceImages[0],
+                mask: maskImage,
+                size,
+                n,
+                quality
               })
-            },
-            onError: (error) => {
-              // 处理流式 API 错误
-              if (typeof error === 'object' && error !== null) {
-                const apiError = error as any
-                setError(`图片生成失败: ${apiError.message || '未知错误'}\n${apiError.code ? `错误代码: ${apiError.code}` : ''}`)
-              } else {
-                setError(error.toString())
+              
+              if (editResponse.data && editResponse.data.length > 0) {
+                const imageUrls = editResponse.data.map(img => img.url).filter(Boolean) as string[]
+                setGeneratedImages(imageUrls)
               }
+            } else {
+              // 使用流式生成
+              await api.generateStreamImage({
+                prompt: finalPrompt,
+                model,
+                modelType,
+                isImageToImage: shouldShowImageUpload(),
+                sourceImages,
+                aspectRatio,
+                size,
+                n,
+                quality
+              }, {
+                onMessage: (content) => {
+                  setStreamContent(prev => prev + content)
+                },
+                onComplete: (imageUrl) => {
+                  setGeneratedImages([imageUrl])
+                  setStreamContent("")
+                },
+                onError: (error) => {
+                  setError(error)
+                }
+              })
             }
+          } else {
+            // 文生图，使用流式生成
+            await api.generateStreamImage({
+              prompt: finalPrompt,
+              model,
+              modelType,
+              isImageToImage: false,
+              aspectRatio,
+              size,
+              n,
+              quality
+            }, {
+              onMessage: (content) => {
+                setStreamContent(prev => prev + content)
+              },
+              onComplete: (imageUrl) => {
+                setGeneratedImages([imageUrl])
+                setStreamContent("")
+              },
+              onError: (error) => {
+                setError(error)
+              }
+            })
           }
-        )
+        }
+        
+        // 添加到历史记录
+        if (modelType === ModelType.FAL && response?.imageUrl) {
+          storage.addToHistory({
+            id: uuidv4(),
+            prompt: finalPrompt,
+            url: response.imageUrl,
+            model,
+            createdAt: new Date().toISOString(),
+            aspectRatio
+          })
+        } else if (modelType === ModelType.OPENAI && generatedImages.length > 0) {
+          storage.addToHistory({
+            id: uuidv4(),
+            prompt: finalPrompt,
+            url: generatedImages[0],
+            model,
+            createdAt: new Date().toISOString(),
+            aspectRatio
+          })
+        }
+        
+      } catch (err) {
+        if (err instanceof Error) {
+          setError(err.message)
+        } else {
+          setError('生成图片失败，请重试')
+        }
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : "生成失败，请重试")
@@ -291,9 +363,12 @@ function HomeContent() {
     setStreamContent("")
     setSourceImages([])
     setMaskImage(null)
-    setAspectRatio("1:1")
+    setAspectRatio(shouldShowImageUpload() ? "original" : "1:1")
     setSize("1024x1024")
     setN(1)
+    setEnableSafetyChecker(true)
+    setSafetyTolerance("2")
+    setDuration("5")
     setCurrentImageIndex(0)
   }
 
@@ -307,7 +382,6 @@ function HomeContent() {
 
   const handleEditCurrentImage = () => {
     if (generatedImages[currentImageIndex]) {
-      setIsImageToImage(true)
       setSourceImages([generatedImages[currentImageIndex]])
     }
   }
@@ -318,11 +392,13 @@ function HomeContent() {
       const link = document.createElement('a');
       link.href = imageUrl;
       
-      // 为base64图片设置合适的文件名
-      if (isBase64Image(imageUrl)) {
+      // 根据内容类型设置文件名
+      if (isVideoUrl(imageUrl)) {
+        link.download = `generated-video-${Date.now()}.mp4`;
+      } else if (isBase64Image(imageUrl)) {
         link.download = `generated-image-${Date.now()}.png`;
       } else {
-        link.download = 'generated-image.png';
+        link.download = 'generated-content';
       }
       
       document.body.appendChild(link);
@@ -355,13 +431,13 @@ function HomeContent() {
         <p className="text-gray-500 mt-2">通过简单的文字描述，创造精美的AI艺术作品</p>
       </div>
 
-      <div className="container mx-auto px-4 pb-8 max-w-[1200px]">
-        <div className="grid grid-cols-[300px_1fr] gap-6">
+      <div className="container mx-auto px-4 pb-8 max-w-[1400px]">
+        <div className="grid grid-cols-[1fr_2fr] gap-6">
           {/* 左侧控制面板 */}
           <div className="space-y-6">
-            <Card className="sticky top-4">
+            <Card className="sticky top-4 z-10">
               <CardContent className="p-4 space-y-4">
-                <div className="flex items-center gap-4">
+                <div className="flex items-center gap-2">
                   <Button 
                     variant="outline" 
                     size="sm"
@@ -381,28 +457,25 @@ function HomeContent() {
                 </div>
 
                 <div className="space-y-2">
-                  <h3 className="font-medium">生成模式</h3>
-                  <div className="grid grid-cols-2 gap-2">
-                    <Button 
-                      variant={isImageToImage ? "outline" : "secondary"} 
-                      className="w-full"
-                      onClick={() => setIsImageToImage(false)}
-                    >
-                      <MessageSquare className="h-4 w-4 mr-2" />
-                      文生图
-                    </Button>
-                    <Button 
-                      variant={isImageToImage ? "secondary" : "outline"}
-                      className="w-full"
-                      onClick={() => setIsImageToImage(true)}
-                    >
-                      <ImageIcon className="h-4 w-4 mr-2" />
-                      图生图
-                    </Button>
+                  <h3 className="font-medium">当前模式</h3>
+                  <div className="p-3 bg-gray-50 rounded-lg border">
+                    <div className="flex items-center gap-2">
+                      {shouldShowImageUpload() ? (
+                        <ImageIcon className="h-4 w-4 text-blue-500" />
+                      ) : (
+                        <MessageSquare className="h-4 w-4 text-green-500" />
+                      )}
+                      <span className="font-medium">{getCurrentModeDescription()}</span>
+                    </div>
+                    <p className="text-xs text-gray-500 mt-1">
+                      {shouldShowImageUpload() 
+                        ? "需要上传图片作为输入" 
+                        : "基于文字描述生成内容"}
+                    </p>
                   </div>
                 </div>
 
-                {isImageToImage && (
+                {shouldShowImageUpload() && (
                   <div className="space-y-2">
                     <h3 className="font-medium">上传图片进行编辑</h3>
                     <div 
@@ -458,7 +531,7 @@ function HomeContent() {
                   </div>
                 )}
 
-                {isImageToImage && sourceImages.length > 0 && (model === 'dall-e-3' || model === 'gpt-image-1' || modelType === ModelType.DALLE) && (
+                {shouldShowImageUpload() && sourceImages.length > 0 && (model === 'gpt-image-1' || modelType === ModelType.OPENAI) && (
                   <Button
                     variant="outline"
                     className="w-full"
@@ -488,11 +561,12 @@ function HomeContent() {
                       value={model} 
                       onValueChange={(value: GenerationModel) => {
                         setModel(value)
-                        // 为内置模型设置对应的模型类型
-                        if (value === 'dall-e-3' || value === 'gpt-image-1') {
-                          setModelType(ModelType.DALLE)
+                        // 根据选择的模型设置模型类型
+                        const customModel = customModels.find(m => m.value === value)
+                        if (customModel) {
+                          setModelType(customModel.type)
                         } else {
-                          setModelType(ModelType.OPENAI)
+                          setModelType(ModelType.FAL) // 默认为FAL类型
                         }
                       }}
                     >
@@ -500,23 +574,59 @@ function HomeContent() {
                         <SelectValue placeholder="选择生成模型" />
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="sora_image">GPT Sora_Image 模型</SelectItem>
-                        <SelectItem value="gpt_4o_image">GPT 4o_Image 模型</SelectItem>
-                        <SelectItem value="gpt-image-1">GPT Image 1 模型</SelectItem>
-                        <SelectItem value="dall-e-3">DALL-E 3 模型</SelectItem>
+                        {/* 显示默认模型 */}
+                        {customModels.filter(m => m.isDefault).map(model => (
+                          <SelectItem key={model.id} value={model.value}>
+                            <div className="flex items-center justify-between w-full">
+                              <span>{model.name}</span>
+                              {model.type === ModelType.FAL && model.tag && (
+                                <span className="bg-gray-100 text-gray-800 text-xs px-2 py-1 rounded-full ml-2">
+                                  {getTagDisplayText(model.tag)}
+                                </span>
+                              )}
+                            </div>
+                          </SelectItem>
+                        ))}
                         
-                        {/* 显示自定义模型 */}
-                        {storage.getCustomModels().length > 0 && (
+                        {/* 显示FAL自定义模型 */}
+                        {customModels.filter(m => m.type === ModelType.FAL && !m.isDefault).length > 0 && (
                           <>
-                            <SelectItem value="divider" disabled>
-                              ──── 自定义模型 ────
+                            <SelectItem value="divider-fal" disabled>
+                              ──── FAL 自定义模型 ────
                             </SelectItem>
-                            {storage.getCustomModels().map(customModel => (
+                            {customModels.filter(m => m.type === ModelType.FAL && !m.isDefault).map(customModel => (
                               <SelectItem 
                                 key={customModel.id} 
                                 value={customModel.value}
                               >
-                                {customModel.name} ({customModel.type === ModelType.DALLE ? "DALL-E" : "OpenAI"})
+                                <div className="flex items-center justify-between w-full">
+                                  <span>{customModel.name}</span>
+                                  {customModel.tag && (
+                                    <span className="bg-gray-100 text-gray-800 text-xs px-2 py-1 rounded-full ml-2">
+                                      {getTagDisplayText(customModel.tag)}
+                                    </span>
+                                  )}
+                                </div>
+                              </SelectItem>
+                            ))}
+                          </>
+                        )}
+                        
+                        {/* 显示OpenAI自定义模型 */}
+                        {customModels.filter(m => m.type === ModelType.OPENAI && !m.isDefault).length > 0 && (
+                          <>
+                            <SelectItem value="divider-openai" disabled>
+                              ──── OpenAI 自定义模型 ────
+                            </SelectItem>
+                            {customModels.filter(m => m.type === ModelType.OPENAI && !m.isDefault).map(customModel => (
+                              <SelectItem 
+                                key={customModel.id} 
+                                value={customModel.value}
+                              >
+                                <div className="flex items-center justify-between w-full">
+                                  <span>{customModel.name}</span>
+                                  {/* OpenAI模型不显示标签 */}
+                                </div>
                               </SelectItem>
                             ))}
                           </>
@@ -532,106 +642,128 @@ function HomeContent() {
                       <Settings className="h-4 w-4" />
                     </Button>
                   </div>
-                  <p className="text-xs text-gray-500">模型类型: {modelType === ModelType.DALLE ? 'DALL-E格式' : 'OpenAI格式'}</p>
+                  <p className="text-xs text-gray-500">模型类型: {modelType === ModelType.FAL ? 'FAL格式' : 'OpenAI格式'}</p>
                   <p className="text-xs text-gray-500">选择不同的AI模型可能会产生不同风格的图像结果</p>
                 </div>
+              </CardContent>
+            </Card>
 
-                {(model === 'dall-e-3' || model === 'gpt-image-1' || modelType === ModelType.DALLE) && (
-                  <>
-                    <div className="space-y-2">
-                      <h3 className="font-medium">图片尺寸</h3>
-                      <Select value={size} onValueChange={(value: ImageSize) => setSize(value)}>
-                        <SelectTrigger>
-                          <SelectValue placeholder="选择图片尺寸" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="1024x1024">1024x1024 方形</SelectItem>
-                          <SelectItem value="1536x1024">1536x1024 横向</SelectItem>
-                          <SelectItem value="1024x1536">1024x1536 纵向</SelectItem>
-                          <SelectItem value="1792x1024">1792x1024 宽屏</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-
-                    <div className="space-y-2">
-                      <h3 className="font-medium">生成数量</h3>
-                      <Select value={n.toString()} onValueChange={(value) => setN(parseInt(value))}>
-                        <SelectTrigger>
-                          <SelectValue placeholder="选择生成数量" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="1">1张</SelectItem>
-                          <SelectItem value="2">2张</SelectItem>
-                          <SelectItem value="3">3张</SelectItem>
-                          <SelectItem value="4">4张</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-
-                    {isImageToImage && (
-                      <div className="space-y-2">
-                        <h3 className="font-medium">图片质量</h3>
-                        <Select 
-                          value={quality} 
-                          onValueChange={(value: 'auto' | 'high' | 'medium' | 'low' | 'hd' | 'standard') => setQuality(value)}
-                        >
-                          <SelectTrigger>
-                            <SelectValue placeholder="选择图片质量" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {model === 'dall-e-3' ? (
-                              <>
-                                <SelectItem value="hd">HD 高质量</SelectItem>
-                                <SelectItem value="standard">标准质量</SelectItem>
-                                <SelectItem value="auto">自动选择</SelectItem>
-                              </>
-                            ) : model === 'gpt-image-1' ? (
-                              <>
-                                <SelectItem value="high">高质量</SelectItem>
-                                <SelectItem value="medium">中等质量</SelectItem>
-                                <SelectItem value="low">低质量</SelectItem>
-                                <SelectItem value="auto">自动选择</SelectItem>
-                              </>
-                            ) : null}
-                          </SelectContent>
-                        </Select>
-                      </div>
-                    )}
-                  </>
-                )}
-
-                {!(model === 'dall-e-3' || model === 'gpt-image-1' || modelType === ModelType.DALLE) && (
+            {/* 图片配置 */}
+            {model && customModels.find(m => m.value === model) && (
+              <Card className="sticky top-2 z-20">
+                <CardContent className="p-4 space-y-4">
                   <div className="space-y-2">
-                    <h3 className="font-medium">图片比例</h3>
-                    <Select value={aspectRatio} onValueChange={(value: AspectRatio) => setAspectRatio(value)}>
+                    <h3 className="font-medium">图片配置</h3>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                      <h4 className="text-sm font-medium">图片比例</h4>
+                      <Select value={aspectRatio} onValueChange={(value: AspectRatio) => setAspectRatio(value)}>
+                        <SelectTrigger>
+                          <SelectValue placeholder="选择图片比例" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {shouldShowImageUpload() && (
+                            <SelectItem value="original">原始比例</SelectItem>
+                          )}
+                          <SelectItem value="1:1">1:1 方形</SelectItem>
+                          <SelectItem value="16:9">16:9 宽屏</SelectItem>
+                          <SelectItem value="9:16">9:16 竖屏</SelectItem>
+                          <SelectItem value="2:3">2:3 竖向</SelectItem>
+                          <SelectItem value="3:2">3:2 横向</SelectItem>
+                          <SelectItem value="4:5">4:5 竖向</SelectItem>
+                          <SelectItem value="5:4">5:4 横向</SelectItem>
+                          <SelectItem value="3:4">3:4 竖向</SelectItem>
+                          <SelectItem value="4:3">4:3 横向</SelectItem>
+                          <SelectItem value="21:9">21:9 超宽屏</SelectItem>
+                          <SelectItem value="9:21">9:21 超竖屏</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+
+                  <div className="space-y-2">
+                    <h4 className="text-sm font-medium">生成数量</h4>
+                    <Select value={n.toString()} onValueChange={(value) => setN(parseInt(value))}>
                       <SelectTrigger>
-                        <SelectValue placeholder="选择图片比例" />
+                        <SelectValue placeholder="选择生成数量" />
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="1:1">1:1 方形</SelectItem>
-                        <SelectItem value="16:9">16:9 宽屏</SelectItem>
-                        <SelectItem value="9:16">9:16 竖屏</SelectItem>
+                        <SelectItem value="1">1张</SelectItem>
+                        <SelectItem value="2">2张</SelectItem>
+                        <SelectItem value="3">3张</SelectItem>
+                        <SelectItem value="4">4张</SelectItem>
                       </SelectContent>
                     </Select>
                   </div>
-                )}
 
-                <Button 
-                  className="w-full" 
-                  onClick={handleGenerate}
-                  disabled={isGenerating}
-                >
-                  {isGenerating ? "生成中..." : isImageToImage ? "编辑图片" : "生成图片"}
-                </Button>
-                <Button 
-                  variant="outline" 
-                  className="w-full"
-                  onClick={handleReset}
-                >
-                  重置
-                </Button>
+                  <div className="space-y-2">
+                    <h4 className="text-sm font-medium">安全检查器</h4>
+                    <Select value={enableSafetyChecker.toString()} onValueChange={(value) => setEnableSafetyChecker(value === 'true')}>
+                      <SelectTrigger>
+                        <SelectValue placeholder="选择是否启用安全检查" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="true">启用</SelectItem>
+                        <SelectItem value="false">禁用</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  {isVideoModel() ? (
+                    <div className="space-y-2">
+                      <h4 className="text-sm font-medium">视频时长</h4>
+                      <Select value={duration} onValueChange={(value: '5' | '10') => setDuration(value)}>
+                        <SelectTrigger>
+                          <SelectValue placeholder="选择视频时长" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="5">5秒</SelectItem>
+                          <SelectItem value="10">10秒</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  ) : (
+                    <div className="space-y-2">
+                      <h4 className="text-sm font-medium">安全容错级别</h4>
+                      <Select value={safetyTolerance} onValueChange={(value: '1' | '2' | '3' | '4' | '5' | '6') => setSafetyTolerance(value)}>
+                        <SelectTrigger>
+                          <SelectValue placeholder="选择安全容错级别" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="1">1 - 最严格</SelectItem>
+                          <SelectItem value="2">2 - 严格</SelectItem>
+                          <SelectItem value="3">3 - 中等</SelectItem>
+                          <SelectItem value="4">4 - 宽松</SelectItem>
+                          <SelectItem value="5">5 - 很宽松</SelectItem>
+                          <SelectItem value="6">6 - 最宽松</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  )}
+                </div>
+
+                <div className="space-y-2 pt-2">
+                  <Button 
+                    className="w-full" 
+                    onClick={handleGenerate}
+                    disabled={isGenerating}
+                  >
+                    {isGenerating ? "生成中..." : 
+                     isVideoModel() ? "生成视频" :
+                     shouldShowImageUpload() ? "编辑图片" : "生成图片"}
+                  </Button>
+                  <Button 
+                    variant="outline" 
+                    className="w-full"
+                    onClick={handleReset}
+                  >
+                    重置
+                  </Button>
+                </div>
               </CardContent>
             </Card>
+            )}
           </div>
 
           {/* 右侧内容区 */}
@@ -652,7 +784,6 @@ function HomeContent() {
                       size="icon" 
                       variant="ghost"
                       onClick={() => {
-                        setIsImageToImage(true)
                         setSourceImages([generatedImages[currentImageIndex]])
                       }}
                     >
@@ -669,60 +800,47 @@ function HomeContent() {
                 </div>
               ) : (
                 <div className="w-full h-full flex flex-col gap-4">
-                  {(model === 'dall-e-3' || model === 'gpt-image-1' || modelType === ModelType.DALLE) ? (
+                  {isGenerating ? (
                     <div className="text-center text-gray-400">
-                      {isGenerating ? "正在生成中..." : generatedImages.length === 0 ? "等待生成..." : null}
+                      {modelType === ModelType.FAL 
+                        ? (isVideoModel() ? "正在生成视频中，请耐心等待..." : "正在生成图片中...") 
+                        : "正在生成中..."}
                     </div>
                   ) : (
-                    <div 
-                      ref={contentRef}
-                      className="flex-1 overflow-y-auto rounded-lg bg-gray-50 p-4 font-mono text-sm min-h-[200px] markdown-content"
-                    >
-                      {streamContent ? (
-                        <ReactMarkdown
-                          remarkPlugins={[remarkGfm]}
-                          rehypePlugins={[rehypeHighlight]}
-                          components={{
-                            // 自定义链接在新窗口打开
-                            a: ({ node, ...props }) => (
-                              <a target="_blank" rel="noopener noreferrer" {...props} />
-                            ),
-                            // 自定义代码块样式
-                            code: ({ node, className, children, ...props }: any) => {
-                              const match = /language-(\w+)/.exec(className || '')
-                              // 内联代码与代码块处理
-                              const isInline = !match && !className
-                              if (isInline) {
-                                return <code className={className} {...props}>{children}</code>
-                              }
-                              // 代码块
-                              return (
-                                <pre className={`${className || ''}`}>
-                                  <code className={match ? `language-${match[1]}` : ''} {...props}>
-                                    {children}
-                                  </code>
-                                </pre>
-                              )
-                            }
-                          }}
-                        >
-                          {streamContent}
-                        </ReactMarkdown>
-                      ) : (
-                        <div className="text-gray-400 text-center">
-                          {isGenerating ? "正在生成中..." : "等待生成..."}
-                        </div>
-                      )}
+                    <div className="text-center text-gray-400">
+                      {generatedImages.length === 0 ? "等待生成..." : null}
                     </div>
                   )}
+                  
+                  {/* 显示流式内容（仅用于 OpenAI 模型） */}
+                  {modelType === ModelType.OPENAI && streamContent && (
+                    <div className="text-sm text-gray-600 whitespace-pre-line">
+                      <ReactMarkdown 
+                        remarkPlugins={[remarkGfm]}
+                        rehypePlugins={[rehypeHighlight]}
+                      >
+                        {streamContent}
+                      </ReactMarkdown>
+                    </div>
+                  )}
+                  
                   {generatedImages.length > 0 && (
                     <div className="relative w-full aspect-square max-w-2xl mx-auto">
-                      <Image
-                        src={generatedImages[currentImageIndex]}
-                        alt={prompt}
-                        fill
-                        className="object-contain rounded-lg"
-                      />
+                      {isVideoUrl(generatedImages[currentImageIndex]) ? (
+                        <video
+                          src={generatedImages[currentImageIndex]}
+                          controls
+                          className="w-full h-full object-contain rounded-lg"
+                          style={{ maxHeight: '100%', maxWidth: '100%' }}
+                        />
+                      ) : (
+                        <Image
+                          src={generatedImages[currentImageIndex]}
+                          alt={prompt}
+                          fill
+                          className="object-contain rounded-lg"
+                        />
+                      )}
                       {generatedImages.length > 1 && (
                         <>
                           <Button
@@ -763,8 +881,17 @@ function HomeContent() {
         open={showHistoryDialog} 
         onOpenChange={setShowHistoryDialog}
         onEditImage={(imageUrl) => {
-          setIsImageToImage(true)
           setSourceImages([imageUrl])
+          
+          // 寻找第一个图生图模型
+          const imageToImageModel = customModels.find(m => 
+            m.tag === ModelTag.IMAGE_TO_IMAGE
+          )
+          
+          if (imageToImageModel) {
+            setModel(imageToImageModel.value)
+            setModelType(imageToImageModel.type)
+          }
         }}
       />
       <CustomModelDialog
@@ -788,12 +915,21 @@ function HomeContent() {
       <Dialog open={showImageDialog} onOpenChange={setShowImageDialog}>
         <DialogContent className="max-w-4xl">
           <div className="relative w-full aspect-square">
-            <Image
-              src={generatedImages[currentImageIndex]}
-              alt={prompt}
-              fill
-              className="object-contain rounded-lg"
-            />
+            {generatedImages.length > 0 && isVideoUrl(generatedImages[currentImageIndex]) ? (
+              <video
+                src={generatedImages[currentImageIndex]}
+                controls
+                className="w-full h-full object-contain rounded-lg"
+                style={{ maxHeight: '100%', maxWidth: '100%' }}
+              />
+            ) : (
+              <Image
+                src={generatedImages[currentImageIndex]}
+                alt={prompt}
+                fill
+                className="object-contain rounded-lg"
+              />
+            )}
           </div>
         </DialogContent>
       </Dialog>

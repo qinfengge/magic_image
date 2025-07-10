@@ -1,10 +1,23 @@
-import { ApiConfig, GeneratedImage, CustomModel } from "@/types"
+import { ApiConfig, GeneratedImage, CustomModel, ModelType, ModelTag } from "@/types"
 
 const STORAGE_KEYS = {
   API_CONFIG: 'ai-drawing-api-config',
   HISTORY: 'ai-drawing-history',
   CUSTOM_MODELS: 'ai-drawing-custom-models'
 }
+
+// 默认模型配置
+const DEFAULT_MODELS: CustomModel[] = [
+  {
+    id: 'default-fal-flux-pro',
+    name: 'FAL FLUX Pro',
+    value: 'fal-flux-pro',
+    type: ModelType.FAL,
+    tag: ModelTag.TEXT_TO_IMAGE,
+    createdAt: new Date().toISOString(),
+    isDefault: true
+  }
+]
 
 export const storage = {
   // API 配置相关操作
@@ -14,7 +27,7 @@ export const storage = {
     return data ? JSON.parse(data) : null
   },
 
-  setApiConfig: (key: string, baseUrl: string): void => {
+  setApiConfig: (key: string, baseUrl: string = ""): void => {
     if (typeof window === 'undefined') return
     const apiConfig: ApiConfig = {
       key,
@@ -57,32 +70,45 @@ export const storage = {
 
   // 自定义模型相关操作
   getCustomModels: (): CustomModel[] => {
-    if (typeof window === 'undefined') return []
+    if (typeof window === 'undefined') return DEFAULT_MODELS
     const data = localStorage.getItem(STORAGE_KEYS.CUSTOM_MODELS)
-    return data ? JSON.parse(data) : []
+    const customModels: CustomModel[] = data ? JSON.parse(data) : []
+    
+    // 合并默认模型和自定义模型
+    const allModels = [...DEFAULT_MODELS, ...customModels]
+    
+    // 去重（以id为准）
+    const uniqueModels = allModels.filter((model: CustomModel, index: number, self: CustomModel[]) => 
+      index === self.findIndex((m: CustomModel) => m.id === model.id)
+    )
+    
+    return uniqueModels
   },
 
   addCustomModel: (model: CustomModel): void => {
     if (typeof window === 'undefined') return
-    const models = storage.getCustomModels()
-    models.push(model)
-    localStorage.setItem(STORAGE_KEYS.CUSTOM_MODELS, JSON.stringify(models))
+    const data = localStorage.getItem(STORAGE_KEYS.CUSTOM_MODELS)
+    const customModels: CustomModel[] = data ? JSON.parse(data) : []
+    customModels.push(model)
+    localStorage.setItem(STORAGE_KEYS.CUSTOM_MODELS, JSON.stringify(customModels))
   },
 
   removeCustomModel: (id: string): void => {
     if (typeof window === 'undefined') return
-    const models = storage.getCustomModels()
-    const filtered = models.filter(model => model.id !== id)
+    const data = localStorage.getItem(STORAGE_KEYS.CUSTOM_MODELS)
+    const customModels: CustomModel[] = data ? JSON.parse(data) : []
+    const filtered = customModels.filter((model: CustomModel) => model.id !== id)
     localStorage.setItem(STORAGE_KEYS.CUSTOM_MODELS, JSON.stringify(filtered))
   },
 
   updateCustomModel: (id: string, updated: Partial<CustomModel>): void => {
     if (typeof window === 'undefined') return
-    const models = storage.getCustomModels()
-    const index = models.findIndex(model => model.id === id)
+    const data = localStorage.getItem(STORAGE_KEYS.CUSTOM_MODELS)
+    const customModels: CustomModel[] = data ? JSON.parse(data) : []
+    const index = customModels.findIndex((model: CustomModel) => model.id === id)
     if (index !== -1) {
-      models[index] = { ...models[index], ...updated }
-      localStorage.setItem(STORAGE_KEYS.CUSTOM_MODELS, JSON.stringify(models))
+      customModels[index] = { ...customModels[index], ...updated }
+      localStorage.setItem(STORAGE_KEYS.CUSTOM_MODELS, JSON.stringify(customModels))
     }
   }
 } 

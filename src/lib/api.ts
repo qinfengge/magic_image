@@ -2,6 +2,7 @@ import { storage } from "./storage"
 import { GenerationModel, AspectRatio, ImageSize, DalleImageData, ModelType } from "@/types"
 import { toast } from "sonner"
 import { AlertCircle } from "lucide-react"
+import { fal } from "@fal-ai/client"
 
 export interface GenerateImageRequest {
   prompt: string
@@ -15,6 +16,9 @@ export interface GenerateImageRequest {
   quality?: 'high' | 'medium' | 'low' | 'hd' | 'standard'| 'auto'
   mask?: string
   sourceImages?: string[]
+  enableSafetyChecker?: boolean
+  safetyTolerance?: '1' | '2' | '3' | '4' | '5' | '6'
+  duration?: '5' | '10'
 }
 
 export interface StreamCallback {
@@ -46,6 +50,74 @@ const buildRequestUrl = (baseUrl: string, endpoint: string): string => {
 }
 
 export const api = {
+  generateFalImage: async (request: GenerateImageRequest): Promise<{ imageUrl: string }> => {
+    try {
+      // 配置 fal 客户端
+      const config = storage.getApiConfig()
+      let apiKey = config?.key
+      
+      // 如果没有配置，使用默认密钥
+      if (!apiKey) {
+        apiKey = "efcd5ad0-f538-4898-9bb5-7b6586071e8a:a656dd5786e8413f1f008f4a0851df20"
+      }
+
+      // 配置 fal 客户端
+      fal.config({
+        credentials: apiKey
+      })
+
+      const result = await fal.subscribe(request.model, {
+        input: {
+          prompt: request.prompt,
+          ...(request.sourceImages && request.sourceImages.length > 0 && {
+            image_url: request.sourceImages[0]
+          }),
+          num_images: request.n || 1,
+          ...(request.aspectRatio !== "original" && {
+            aspect_ratio: request.aspectRatio === "1:1" ? "1:1" : 
+                         request.aspectRatio === "16:9" ? "16:9" : 
+                         request.aspectRatio === "9:16" ? "9:16" :
+                         request.aspectRatio === "2:3" ? "2:3" :
+                         request.aspectRatio === "3:2" ? "3:2" :
+                         request.aspectRatio === "4:5" ? "4:5" :
+                         request.aspectRatio === "5:4" ? "5:4" :
+                         request.aspectRatio === "3:4" ? "3:4" :
+                         request.aspectRatio === "4:3" ? "4:3" :
+                         request.aspectRatio === "21:9" ? "21:9" :
+                         request.aspectRatio === "9:21" ? "9:21" : "1:1"
+          }),
+          ...(request.duration && {
+            duration: parseInt(request.duration)
+          }),
+          output_format: "png",
+          enable_safety_checker: request.enableSafetyChecker !== false,
+          safety_tolerance: request.safetyTolerance || "2"
+        },
+        logs: true,
+        onQueueUpdate: (update) => {
+          if (update.status === "IN_PROGRESS") {
+            console.log("生成进度:", update.status)
+          }
+        }
+      })
+
+      if (result.data?.images?.[0]?.url) {
+        return { imageUrl: result.data.images[0].url }
+      } else if (result.data?.video?.url) {
+        return { imageUrl: result.data.video.url }
+      } else if (result.data?.url) {
+        return { imageUrl: result.data.url }
+      } else {
+        console.log('FAL API 响应数据:', result)
+        throw new Error('生成失败：无效的响应数据')
+      }
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : '生成图片失败'
+      showErrorToast(errorMessage)
+      throw new Error(errorMessage)
+    }
+  },
+
   generateDalleImage: async (request: GenerateImageRequest): Promise<DalleImageResponse> => {
     const config = storage.getApiConfig()
     if (!config) {
@@ -59,10 +131,8 @@ export const api = {
     }
 
     // 根据模型类型构建不同的请求URL
-    const modelType = request.modelType || ModelType.DALLE
-    const endpoint = modelType === ModelType.DALLE 
-      ? '/v1/images/generations' 
-      : '/v1/images/generations'
+    const modelType = request.modelType || ModelType.OPENAI
+    const endpoint = '/v1/images/generations'
 
     const requestUrl = buildRequestUrl(config.baseUrl, endpoint);
 
@@ -112,10 +182,8 @@ export const api = {
 
     try {
       // 根据模型类型构建不同的请求URL
-      const modelType = request.modelType || ModelType.DALLE
-      const endpoint = modelType === ModelType.DALLE 
-        ? '/v1/images/edits' 
-        : '/v1/images/edits'
+      const modelType = request.modelType || ModelType.OPENAI
+      const endpoint = '/v1/images/edits'
 
       // 创建 FormData
       const formData = new FormData()
@@ -223,25 +291,14 @@ export const api = {
 
     // 根据模型类型构建不同的请求URL
     const modelType = request.modelType || ModelType.OPENAI
-    const endpoint = modelType === ModelType.DALLE 
-      ? '/v1/images/generations' 
-      : '/v1/chat/completions'
+    const endpoint = '/v1/chat/completions'
 
     // 根据模型类型构建不同的请求体
-    const requestBody = modelType === ModelType.DALLE 
-      ? {
-          model: request.model,
-          prompt: request.prompt,
-          size: request.aspectRatio === '1:1' ? '1024x1024' : 
-                request.aspectRatio === '16:9' ? '1792x1024' : 
-                '1024x1792',
-          n: 1
-        }
-      : {
-          model: request.model,
-          messages,
-          stream: true
-        }
+    const requestBody = {
+      model: request.model,
+      messages,
+      stream: true
+    }
 
     const requestUrl = buildRequestUrl(config.baseUrl, endpoint);
 

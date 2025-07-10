@@ -11,27 +11,36 @@ interface ApiKeyDialogProps {
   onOpenChange: (open: boolean) => void
 }
 
+const DEFAULT_API_KEY = "efcd5ad0-f538-4898-9bb5-7b6586071e8a:a656dd5786e8413f1f008f4a0851df20"
+
 export function ApiKeyDialog({ open, onOpenChange }: ApiKeyDialogProps) {
   const [key, setKey] = useState("")
-  const [baseUrl, setBaseUrl] = useState("")
   const [showKey, setShowKey] = useState(false)
-  const [errors, setErrors] = useState<{ key?: string; baseUrl?: string }>({})
+  const [errors, setErrors] = useState<{ key?: string }>({})
+  const [isUsingDefault, setIsUsingDefault] = useState(false)
 
   useEffect(() => {
     const config = storage.getApiConfig()
     if (config) {
-      setKey(config.key)
-      setBaseUrl(config.baseUrl)
+      // 如果存储的密钥是默认密钥，则不显示
+      if (config.key === DEFAULT_API_KEY) {
+        setKey("")
+        setIsUsingDefault(true)
+      } else {
+        setKey(config.key)
+        setIsUsingDefault(false)
+      }
+    } else {
+      // 首次使用，设置默认密钥
+      storage.setApiConfig(DEFAULT_API_KEY, "")
+      setIsUsingDefault(true)
     }
   }, [open])
 
   const validateInputs = () => {
-    const newErrors: { key?: string; baseUrl?: string } = {}
-    if (!key.trim()) {
-      newErrors.key = "请输入 API Key"
-    }
-    if (!baseUrl.trim()) {
-      newErrors.baseUrl = "请输入API基础地址"
+    const newErrors: { key?: string } = {}
+    if (!key.trim() && !isUsingDefault) {
+      newErrors.key = "请输入 API Key 或使用默认设置"
     }
     setErrors(newErrors)
     return Object.keys(newErrors).length === 0
@@ -40,77 +49,80 @@ export function ApiKeyDialog({ open, onOpenChange }: ApiKeyDialogProps) {
   const handleSave = () => {
     if (!validateInputs()) return
     
-    // 确保使用HTTPS协议
-    let secureUrl = baseUrl.trim()
+    const finalKey = key.trim() || DEFAULT_API_KEY
+    storage.setApiConfig(finalKey, "")
     
-    // 检查URL是否以#结尾（特殊处理标记）
-    const endsWithHash = secureUrl.endsWith('#')
-    
-    if (secureUrl.startsWith('http:') && !endsWithHash) {
-      secureUrl = secureUrl.replace('http:', 'https:')
-      toast.info("为确保安全，已自动将HTTP协议转换为HTTPS")
+    if (key.trim()) {
+      setIsUsingDefault(false)
+      toast.success("自定义 API Key 保存成功")
+    } else {
+      setIsUsingDefault(true)
+      toast.success("已使用默认 API Key")
     }
     
-    storage.setApiConfig(key.trim(), secureUrl)
-    toast.success("保存成功")
     onOpenChange(false)
+  }
+
+  const handleUseDefault = () => {
+    setKey("")
+    setIsUsingDefault(true)
+    setErrors({})
   }
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>API 配置</DialogTitle>
+          <DialogTitle>FAL API 密钥设置</DialogTitle>
         </DialogHeader>
         <div className="space-y-4 py-4">
           <div className="space-y-2">
-            <div>
-              <Input
-                placeholder="请输入API基础地址，如需使用完整URL，请在末尾添加#符号"
-                value={baseUrl}
-                onChange={(e) => {
-                  setBaseUrl(e.target.value)
-                  setErrors(prev => ({ ...prev, baseUrl: undefined }))
-                }}
-                className={errors.baseUrl ? "border-red-500" : ""}
-              />
-              {errors.baseUrl && (
-                <p className="text-sm text-red-500 mt-1">{errors.baseUrl}</p>
+            <div className="space-y-2">
+              {isUsingDefault && !key.trim() && (
+                <div className="p-3 bg-green-50 border border-green-200 rounded-md">
+                  <p className="text-sm text-green-700">
+                    ✓ 当前使用默认 API Key，可直接开始使用
+                  </p>
+                </div>
               )}
-              <div className="flex flex-col gap-1 mt-1">
-                <p className="text-xs text-amber-500">
-                  注意：在HTTPS网站中使用HTTP接口可能会被浏览器阻止，建议使用HTTPS协议
-                </p>
-                <p className="text-xs text-gray-500">
-                  默认添加API路径（如/v1/chat/completions），若URL以#结尾则使用完整输入地址
-                </p>
+              
+              <div className="relative">
+                <Input
+                  type={showKey ? "text" : "password"}
+                  placeholder="输入自定义 FAL API Key（可选）"
+                  value={key}
+                  onChange={(e) => {
+                    setKey(e.target.value)
+                    setIsUsingDefault(false)
+                    setErrors(prev => ({ ...prev, key: undefined }))
+                  }}
+                  className={`pr-10 ${errors.key ? "border-red-500" : ""}`}
+                />
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="absolute right-0 top-0 h-full px-3"
+                  onClick={() => setShowKey(!showKey)}
+                >
+                  {showKey ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                </Button>
+                {errors.key && (
+                  <p className="text-sm text-red-500 mt-1">{errors.key}</p>
+                )}
               </div>
-            </div>
-            <div className="relative">
-              <Input
-                type={showKey ? "text" : "password"}
-                placeholder="请输入您的 API Key"
-                value={key}
-                onChange={(e) => {
-                  setKey(e.target.value)
-                  setErrors(prev => ({ ...prev, key: undefined }))
-                }}
-                className={`pr-10 ${errors.key ? "border-red-500" : ""}`}
-              />
+              
               <Button
-                variant="ghost"
-                size="icon"
-                className="absolute right-0 top-0 h-full px-3"
-                onClick={() => setShowKey(!showKey)}
+                variant="outline"
+                size="sm"
+                onClick={handleUseDefault}
+                className="w-full"
               >
-                {showKey ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                使用默认 API Key
               </Button>
-              {errors.key && (
-                <p className="text-sm text-red-500 mt-1">{errors.key}</p>
-              )}
             </div>
+            
             <p className="text-xs text-gray-500">
-              API 配置将安全地存储在您的浏览器中，不会上传到服务器
+              API Key 将安全地存储在您的浏览器中，不会上传到服务器
             </p>
           </div>
           <div className="flex justify-end gap-2">
