@@ -39,6 +39,55 @@ const showErrorToast = (message: string) => {
   })
 }
 
+// 文件大小检查常量（1.5MB阈值）
+const FILE_SIZE_THRESHOLD = 1.5 * 1024 * 1024
+
+// 将base64转换为File对象
+const base64ToFile = (base64: string, filename: string = 'image.png'): File => {
+  const arr = base64.split(',')
+  const mime = arr[0].match(/:(.*?);/)![1]
+  const bstr = atob(arr[1])
+  let n = bstr.length
+  const u8arr = new Uint8Array(n)
+  while (n--) {
+    u8arr[n] = bstr.charCodeAt(n)
+  }
+  return new File([u8arr], filename, { type: mime })
+}
+
+// 获取base64图片大小（字节）
+const getBase64Size = (base64: string): number => {
+  const arr = base64.split(',')
+  const bstr = atob(arr[1])
+  return bstr.length
+}
+
+// 上传文件到FAL存储
+const uploadToFalStorage = async (base64: string): Promise<string> => {
+  try {
+    const file = base64ToFile(base64)
+    const url = await fal.storage.upload(file)
+    return url
+  } catch (error) {
+    console.error('FAL storage upload failed:', error)
+    throw new Error('上传文件到FAL存储失败')
+  }
+}
+
+// 处理图片参数：小文件使用base64，大文件上传到FAL存储
+const processImageParam = async (base64: string): Promise<string> => {
+  const size = getBase64Size(base64)
+  console.log(`图片大小: ${(size / 1024 / 1024).toFixed(2)}MB`)
+  
+  if (size > FILE_SIZE_THRESHOLD) {
+    console.log('图片过大，上传到FAL存储')
+    return await uploadToFalStorage(base64)
+  } else {
+    console.log('图片较小，使用base64')
+    return base64
+  }
+}
+
 // 辅助函数，构建请求URL
 const buildRequestUrl = (baseUrl: string, endpoint: string): string => {
   // 如果URL以#结尾，则使用完整的baseUrl，不添加后缀
@@ -66,11 +115,17 @@ export const api = {
         credentials: apiKey
       })
 
+      // 处理图片参数
+      let processedImageUrl: string | undefined
+      if (request.sourceImages && request.sourceImages.length > 0) {
+        processedImageUrl = await processImageParam(request.sourceImages[0])
+      }
+
       const result = await fal.subscribe(request.model, {
         input: {
           prompt: request.prompt,
-          ...(request.sourceImages && request.sourceImages.length > 0 && {
-            image_url: request.sourceImages[0]
+          ...(processedImageUrl && {
+            image_url: processedImageUrl
           }),
           num_images: request.n || 1,
           ...(request.aspectRatio !== "original" && {
